@@ -7,7 +7,7 @@ import pytz
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "")
+CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")  # ใส่หลาย Chat ID คั่นด้วย , ค่ะ
 ALPHA_KEY = os.environ.get("ALPHA_KEY", "")
 
 TZ = pytz.timezone("Asia/Bangkok")
@@ -18,17 +18,89 @@ IMPACT_EMOJI = {
     "Low": "🟡"
 }
 
-def send_telegram(message):
+# วิเคราะห์ผลข่าวค่ะ
+EVENT_ANALYSIS = {
+    "CPI": {
+        "better": "เงินเฟ้อต่ำกว่าคาด 📉 Fed อาจลดดอกเบี้ย → USD อ่อน, ทองอาจขึ้น, หุ้นอาจขึ้น",
+        "worse": "เงินเฟ้อสูงกว่าคาด 📈 Fed อาจขึ้นดอกเบี้ย → USD แข็ง, ทองอาจลง, หุ้นอาจลง"
+    },
+    "GDP": {
+        "better": "เศรษฐกิจดีกว่าคาด 💪 → USD แข็ง, หุ้นอาจขึ้น",
+        "worse": "เศรษฐกิจแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
+    },
+    "NFP": {
+        "better": "การจ้างงานดีกว่าคาด 💼 → USD แข็ง, ทองอาจลง",
+        "worse": "การจ้างงานแย่กว่าคาด 😟 → USD อ่อน, ทองอาจขึ้น"
+    },
+    "Non-Farm": {
+        "better": "การจ้างงานดีกว่าคาด 💼 → USD แข็ง, ทองอาจลง",
+        "worse": "การจ้างงานแย่กว่าคาด 😟 → USD อ่อน, ทองอาจขึ้น"
+    },
+    "Interest Rate": {
+        "better": "ขึ้นดอกเบี้ยหรือคงที่สูง 📈 → USD แข็ง, ทองอาจลง",
+        "worse": "ลดดอกเบี้ย 📉 → USD อ่อน, ทองอาจขึ้น"
+    },
+    "Unemployment": {
+        "better": "ว่างงานต่ำกว่าคาด ✅ → USD แข็ง, หุ้นอาจขึ้น",
+        "worse": "ว่างงานสูงกว่าคาด ❌ → USD อ่อน, หุ้นอาจลง"
+    },
+    "PMI": {
+        "better": "กิจกรรมเศรษฐกิจดีกว่าคาด 💪 → USD แข็ง, หุ้นอาจขึ้น",
+        "worse": "กิจกรรมเศรษฐกิจแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
+    },
+    "PPI": {
+        "better": "เงินเฟ้อผู้ผลิตต่ำกว่าคาด 📉 → USD อ่อน, ทองอาจขึ้น",
+        "worse": "เงินเฟ้อผู้ผลิตสูงกว่าคาด 📈 → USD แข็ง, ทองอาจลง"
+    },
+    "Retail Sales": {
+        "better": "การใช้จ่ายดีกว่าคาด 🛍 → USD แข็ง, หุ้นอาจขึ้น",
+        "worse": "การใช้จ่ายแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
+    },
+}
+
+def get_analysis(title, actual, forecast):
+    try:
+        if actual == "-" or forecast == "-":
+            return None
+        actual_val = float(str(actual).replace("%", "").replace("K", "000").replace("M", "000000").strip())
+        forecast_val = float(str(forecast).replace("%", "").replace("K", "000").replace("M", "000000").strip())
+
+        for key, analysis in EVENT_ANALYSIS.items():
+            if key.lower() in title.lower():
+                is_unemployment = "unemployment" in key.lower()
+                if is_unemployment:
+                    is_better = actual_val < forecast_val
+                else:
+                    is_better = actual_val > forecast_val
+
+                diff = abs(actual_val - forecast_val)
+                if diff == 0:
+                    return "📊 ตรงตามคาด ไม่มีผลกระทบมากนักค่ะ"
+
+                result = "🟢 ดีกว่าคาด" if is_better else "🔴 แย่กว่าคาด"
+                detail = analysis["better"] if is_better else analysis["worse"]
+                return f"{result}\n💡 {detail}"
+        return None
+    except:
+        return None
+
+def send_telegram(message, chat_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         r = requests.post(url, json={
-            "chat_id": CHAT_ID,
+            "chat_id": chat_id,
             "text": message,
             "parse_mode": "HTML"
         }, timeout=10)
-        print(f"Telegram response: {r.status_code}")
+        print(f"Sent to {chat_id}: {r.status_code}")
     except Exception as e:
         print(f"Telegram error: {e}")
+
+def send_all(message):
+    for chat_id in CHAT_IDS:
+        chat_id = chat_id.strip()
+        if chat_id:
+            send_telegram(message, chat_id)
 
 def get_events():
     try:
@@ -76,7 +148,7 @@ def index():
 def daily():
     events = get_events()
     if not events:
-        send_telegram("📅 <b>สรุปเหตุการณ์วันนี้</b>\n\nไม่มีข่าวสำคัญวันนี้ค่ะ ✅")
+        send_all("📅 <b>สรุปเหตุการณ์วันนี้</b>\n\nไม่มีข่าวสำคัญวันนี้ค่ะ ✅")
         return "No events today"
 
     msg = f"📅 <b>เหตุการณ์เศรษฐกิจวันนี้</b>\n"
@@ -89,7 +161,7 @@ def daily():
         msg += f"🌍 {e['country']} | ⏰ {time_str} น.\n"
         msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}\n\n"
 
-    send_telegram(msg)
+    send_all(msg)
     return "Daily summary sent!"
 
 @app.route("/alert")
@@ -111,25 +183,30 @@ def alert():
                 msg += f"🌍 {e['country']}\n"
                 msg += f"🕐 เวลา {e['time'].strftime('%H:%M')} น.\n"
                 msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}"
-                send_telegram(msg)
+                send_all(msg)
                 sent += 1
 
         if -3 <= diff <= -1:
             emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
             actual = e.get("actual", "-")
+            analysis = get_analysis(e["title"], actual, e["forecast"])
+
             msg = f"📢 <b>สรุปผลข่าว</b>\n\n"
             msg += f"{emoji} <b>{e['title']}</b>\n"
             msg += f"🌍 {e['country']}\n\n"
             msg += f"✅ ผลจริง: <b>{actual}</b>\n"
-            msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}"
-            send_telegram(msg)
+            msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}\n"
+            if analysis:
+                msg += f"\n{analysis}"
+
+            send_all(msg)
             sent += 1
 
     return f"Checked alerts, sent {sent} messages"
 
 @app.route("/test")
 def test():
-    send_telegram("🤖 <b>Economic Calendar Bot ทดสอบระบบค่ะ!</b>\n\nBot พร้อมทำงานแล้วค่ะ ✅")
+    send_all("🤖 <b>Economic Calendar Bot ทดสอบระบบค่ะ!</b>\n\nBot พร้อมทำงานแล้วค่ะ ✅")
     return "Test sent!"
 
 if __name__ == "__main__":
