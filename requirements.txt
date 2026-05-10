@@ -1,6 +1,4 @@
 flask
 requests
-apscheduler
 pytz
 gunicorn
-gevent>=24.10.1
