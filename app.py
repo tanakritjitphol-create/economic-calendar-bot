@@ -10,9 +10,9 @@ from flask import Flask
 app = Flask(__name__)
 
 # ===== ตั้งค่าตรงนี้ค่ะ =====
-TELEGRAM_TOKEN = "ใส่ Telegram Token ของแฟ้มตรงนี้"
-CHAT_ID = "ใส่ Chat ID ของแฟ้มตรงนี้"
-ALPHA_KEY = "ใส่ Alpha Vantage API Key ตรงนี้"
+TELEGRAM_TOKEN = "8648221285:AAGDO-wrMCoXiwi3A2Vy1vlbZ9t20X2qZxA"
+CHAT_ID = "8379040124"
+ALPHA_KEY = "XWJGG2KTQW35QXNM"
 
 TZ = pytz.timezone("Asia/Bangkok")
 scheduler = BackgroundScheduler(timezone=TZ)
