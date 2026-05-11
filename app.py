@@ -13,6 +13,9 @@ BASE_URL = os.environ.get("BASE_URL", "")
 
 TZ = pytz.timezone("Asia/Bangkok")
 
+# เก็บ message_id ที่ Bot ส่งค่ะ
+sent_messages = {}  # {chat_id: [message_id, ...]}
+
 IMPACT_EMOJI = {
     "High": "🔴",
     "Medium": "🟠",
@@ -79,8 +82,26 @@ def send_telegram(message, chat_id):
             "parse_mode": "HTML"
         }, timeout=10)
         print(f"Sent to {chat_id}: {r.status_code}")
+        data = r.json()
+        if data.get("ok"):
+            msg_id = data["result"]["message_id"]
+            key = str(chat_id)
+            if key not in sent_messages:
+                sent_messages[key] = []
+            sent_messages[key].append(msg_id)
     except Exception as e:
         print(f"Telegram error: {e}")
+
+def delete_messages(chat_id):
+    key = str(chat_id)
+    ids = sent_messages.get(key, [])
+    for msg_id in ids:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteMessage"
+            requests.post(url, json={"chat_id": chat_id, "message_id": msg_id}, timeout=10)
+        except:
+            pass
+    sent_messages[key] = []
 
 def send_all(message):
     for chat_id in CHAT_IDS:
@@ -151,9 +172,14 @@ def webhook():
             msg = build_daily_message()
             send_telegram(msg, chat_id)
 
+        elif text == "/clear":
+            delete_messages(chat_id)
+            send_telegram("🧹 ลบข้อความของ Bot ทั้งหมดแล้วค่ะ!", chat_id)
+
         elif text == "/help":
             msg = "🤖 <b>คำสั่งที่ใช้ได้ค่ะ</b>\n\n"
             msg += "/today - ดูข่าวเศรษฐกิจวันนี้ค่ะ\n"
+            msg += "/clear - ลบข้อความของ Bot ทั้งหมดค่ะ\n"
             msg += "/help - ดูคำสั่งทั้งหมดค่ะ"
             send_telegram(msg, chat_id)
 
