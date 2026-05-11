@@ -7,7 +7,7 @@ import pytz
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("8648221285:AAGnZC1ujew6seX9wxYz3b-WytN75hss5pM", "8648221285:AAGnZC1ujew6seX9wxYz3b-WytN75hss5pM")
-CHAT_IDS = os.environ.get("CHAT_IDS", "8379040124", "8648221285").split(",")  # ใส่หลาย Chat ID คั่นด้วย , ค่ะ
+CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")  # ใส่หลาย Chat ID คั่นด้วย , ค่ะ
 ALPHA_KEY = os.environ.get("XWJGG2KTQW35QXNM", "XWJGG2KTQW35QXNM")
 
 TZ = pytz.timezone("Asia/Bangkok")
