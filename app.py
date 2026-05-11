@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request, jsonify
 import requests
 import os
 from datetime import datetime, timedelta
@@ -6,9 +6,10 @@ import pytz
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = os.environ.get("8648221285:AAGnZC1ujew6seX9wxYz3b-WytN75hss5pM", "8648221285:AAGnZC1ujew6seX9wxYz3b-WytN75hss5pM")
-CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")  # ใส่หลาย Chat ID คั่นด้วย , ค่ะ
-ALPHA_KEY = os.environ.get("XWJGG2KTQW35QXNM", "XWJGG2KTQW35QXNM")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")
+ALPHA_KEY = os.environ.get("ALPHA_KEY", "")
+BASE_URL = os.environ.get("BASE_URL", "")
 
 TZ = pytz.timezone("Asia/Bangkok")
 
@@ -18,7 +19,6 @@ IMPACT_EMOJI = {
     "Low": "🟡"
 }
 
-# วิเคราะห์ผลข่าวค่ะ
 EVENT_ANALYSIS = {
     "CPI": {
         "better": "เงินเฟ้อต่ำกว่าคาด 📉 Fed อาจลดดอกเบี้ย → USD อ่อน, ทองอาจขึ้น, หุ้นอาจขึ้น",
@@ -27,10 +27,6 @@ EVENT_ANALYSIS = {
     "GDP": {
         "better": "เศรษฐกิจดีกว่าคาด 💪 → USD แข็ง, หุ้นอาจขึ้น",
         "worse": "เศรษฐกิจแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
-    },
-    "NFP": {
-        "better": "การจ้างงานดีกว่าคาด 💼 → USD แข็ง, ทองอาจลง",
-        "worse": "การจ้างงานแย่กว่าคาด 😟 → USD อ่อน, ทองอาจขึ้น"
     },
     "Non-Farm": {
         "better": "การจ้างงานดีกว่าคาด 💼 → USD แข็ง, ทองอาจลง",
@@ -48,10 +44,6 @@ EVENT_ANALYSIS = {
         "better": "กิจกรรมเศรษฐกิจดีกว่าคาด 💪 → USD แข็ง, หุ้นอาจขึ้น",
         "worse": "กิจกรรมเศรษฐกิจแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
     },
-    "PPI": {
-        "better": "เงินเฟ้อผู้ผลิตต่ำกว่าคาด 📉 → USD อ่อน, ทองอาจขึ้น",
-        "worse": "เงินเฟ้อผู้ผลิตสูงกว่าคาด 📈 → USD แข็ง, ทองอาจลง"
-    },
     "Retail Sales": {
         "better": "การใช้จ่ายดีกว่าคาด 🛍 → USD แข็ง, หุ้นอาจขึ้น",
         "worse": "การใช้จ่ายแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
@@ -62,21 +54,15 @@ def get_analysis(title, actual, forecast):
     try:
         if actual == "-" or forecast == "-":
             return None
-        actual_val = float(str(actual).replace("%", "").replace("K", "000").replace("M", "000000").strip())
-        forecast_val = float(str(forecast).replace("%", "").replace("K", "000").replace("M", "000000").strip())
-
+        actual_val = float(str(actual).replace("%", "").replace("K", "000").strip())
+        forecast_val = float(str(forecast).replace("%", "").replace("K", "000").strip())
         for key, analysis in EVENT_ANALYSIS.items():
             if key.lower() in title.lower():
                 is_unemployment = "unemployment" in key.lower()
-                if is_unemployment:
-                    is_better = actual_val < forecast_val
-                else:
-                    is_better = actual_val > forecast_val
-
+                is_better = actual_val < forecast_val if is_unemployment else actual_val > forecast_val
                 diff = abs(actual_val - forecast_val)
                 if diff == 0:
                     return "📊 ตรงตามคาด ไม่มีผลกระทบมากนักค่ะ"
-
                 result = "🟢 ดีกว่าคาด" if is_better else "🔴 แย่กว่าคาด"
                 detail = analysis["better"] if is_better else analysis["worse"]
                 return f"{result}\n💡 {detail}"
@@ -110,7 +96,6 @@ def get_events():
         now = datetime.now(TZ)
         today = now.date()
         events = []
-
         for item in data.get("data", []):
             impact = item.get("impact", "")
             if impact not in ["High", "Medium", "Low"]:
@@ -133,12 +118,55 @@ def get_events():
                     })
             except:
                 continue
-
         events.sort(key=lambda x: x["time"])
         return events
     except Exception as e:
         print(f"API error: {e}")
         return []
+
+def build_daily_message():
+    events = get_events()
+    if not events:
+        return "📅 <b>สรุปเหตุการณ์วันนี้</b>\n\nไม่มีข่าวสำคัญวันนี้ค่ะ ✅"
+    msg = f"📅 <b>เหตุการณ์เศรษฐกิจวันนี้</b>\n"
+    msg += f"🗓 {datetime.now(TZ).strftime('%d/%m/%Y')}\n\n"
+    for e in events:
+        emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
+        time_str = e["time"].strftime("%H:%M") if e["time"].hour != 0 else "ทั้งวัน"
+        msg += f"{emoji} <b>{e['title']}</b>\n"
+        msg += f"🌍 {e['country']} | ⏰ {time_str} น.\n"
+        msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}\n\n"
+    return msg
+
+# ===== Webhook รับคำสั่งจาก Telegram =====
+@app.route(f"/webhook", methods=["POST"])
+def webhook():
+    data = request.json
+    try:
+        message = data.get("message", {})
+        chat_id = str(message.get("chat", {}).get("id", ""))
+        text = message.get("text", "").strip().lower()
+
+        if text == "/today" or text == "/today@" + TELEGRAM_TOKEN.split(":")[0]:
+            msg = build_daily_message()
+            send_telegram(msg, chat_id)
+
+        elif text == "/help":
+            msg = "🤖 <b>คำสั่งที่ใช้ได้ค่ะ</b>\n\n"
+            msg += "/today - ดูข่าวเศรษฐกิจวันนี้ค่ะ\n"
+            msg += "/help - ดูคำสั่งทั้งหมดค่ะ"
+            send_telegram(msg, chat_id)
+
+    except Exception as e:
+        print(f"Webhook error: {e}")
+    return jsonify({"ok": True})
+
+@app.route("/set_webhook")
+def set_webhook():
+    webhook_url = f"https://{BASE_URL}/webhook"
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}"
+    r = requests.get(url)
+    return r.json()
 
 @app.route("/")
 def index():
@@ -146,21 +174,7 @@ def index():
 
 @app.route("/daily")
 def daily():
-    events = get_events()
-    if not events:
-        send_all("📅 <b>สรุปเหตุการณ์วันนี้</b>\n\nไม่มีข่าวสำคัญวันนี้ค่ะ ✅")
-        return "No events today"
-
-    msg = f"📅 <b>เหตุการณ์เศรษฐกิจวันนี้</b>\n"
-    msg += f"🗓 {datetime.now(TZ).strftime('%d/%m/%Y')}\n\n"
-
-    for e in events:
-        emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
-        time_str = e["time"].strftime("%H:%M") if e["time"].hour != 0 else "ทั้งวัน"
-        msg += f"{emoji} <b>{e['title']}</b>\n"
-        msg += f"🌍 {e['country']} | ⏰ {time_str} น.\n"
-        msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}\n\n"
-
+    msg = build_daily_message()
     send_all(msg)
     return "Daily summary sent!"
 
@@ -169,12 +183,10 @@ def alert():
     events = get_events()
     now = datetime.now(TZ)
     sent = 0
-
     for e in events:
         if e["time"].hour == 0:
             continue
         diff = (e["time"] - now).total_seconds() / 60
-
         for mins in [60, 30, 5, 1]:
             if abs(diff - mins) <= 1:
                 emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
@@ -185,12 +197,10 @@ def alert():
                 msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}"
                 send_all(msg)
                 sent += 1
-
         if -3 <= diff <= -1:
             emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
             actual = e.get("actual", "-")
             analysis = get_analysis(e["title"], actual, e["forecast"])
-
             msg = f"📢 <b>สรุปผลข่าว</b>\n\n"
             msg += f"{emoji} <b>{e['title']}</b>\n"
             msg += f"🌍 {e['country']}\n\n"
@@ -198,15 +208,13 @@ def alert():
             msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}\n"
             if analysis:
                 msg += f"\n{analysis}"
-
             send_all(msg)
             sent += 1
-
     return f"Checked alerts, sent {sent} messages"
 
 @app.route("/test")
 def test():
-    send_all("🤖 <b>Economic Calendar Bot ทดสอบระบบค่ะ!</b>\n\nBot พร้อมทำงานแล้วค่ะ ✅")
+    send_all("🤖 <b>Economic Calendar Bot ทดสอบระบบค่ะ!</b>\n\nBot พร้อมทำงานแล้วค่ะ ✅\n\nพิมพ์ /today เพื่อดูข่าววันนี้ได้เลยค่ะ")
     return "Test sent!"
 
 if __name__ == "__main__":
