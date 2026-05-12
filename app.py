@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import requests
+import xml.etree.ElementTree as ET
 import os
 from datetime import datetime, timedelta
 import pytz
@@ -8,24 +9,23 @@ app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")
-ALPHA_KEY = os.environ.get("ALPHA_KEY", "")
 BASE_URL = os.environ.get("BASE_URL", "")
 
 TZ = pytz.timezone("Asia/Bangkok")
 
-# เก็บ message_id ที่ Bot ส่งค่ะ
-sent_messages = {}  # {chat_id: [message_id, ...]}
+sent_messages = {}
 
 IMPACT_EMOJI = {
     "High": "🔴",
     "Medium": "🟠",
-    "Low": "🟡"
+    "Low": "🟡",
+    "Non-Economic": None
 }
 
 EVENT_ANALYSIS = {
     "CPI": {
-        "better": "เงินเฟ้อต่ำกว่าคาด 📉 Fed อาจลดดอกเบี้ย → USD อ่อน, ทองอาจขึ้น, หุ้นอาจขึ้น",
-        "worse": "เงินเฟ้อสูงกว่าคาด 📈 Fed อาจขึ้นดอกเบี้ย → USD แข็ง, ทองอาจลง, หุ้นอาจลง"
+        "better": "เงินเฟ้อต่ำกว่าคาด 📉 Fed อาจลดดอกเบี้ย → USD อ่อน, ทองอาจขึ้น",
+        "worse": "เงินเฟ้อสูงกว่าคาด 📈 Fed อาจขึ้นดอกเบี้ย → USD แข็ง, ทองอาจลง"
     },
     "GDP": {
         "better": "เศรษฐกิจดีกว่าคาด 💪 → USD แข็ง, หุ้นอาจขึ้น",
@@ -36,7 +36,7 @@ EVENT_ANALYSIS = {
         "worse": "การจ้างงานแย่กว่าคาด 😟 → USD อ่อน, ทองอาจขึ้น"
     },
     "Interest Rate": {
-        "better": "ขึ้นดอกเบี้ยหรือคงที่สูง 📈 → USD แข็ง, ทองอาจลง",
+        "better": "ขึ้นดอกเบี้ย 📈 → USD แข็ง, ทองอาจลง",
         "worse": "ลดดอกเบี้ย 📉 → USD อ่อน, ทองอาจขึ้น"
     },
     "Unemployment": {
@@ -55,16 +55,15 @@ EVENT_ANALYSIS = {
 
 def get_analysis(title, actual, forecast):
     try:
-        if actual == "-" or forecast == "-":
+        if not actual or not forecast or actual == "" or forecast == "":
             return None
-        actual_val = float(str(actual).replace("%", "").replace("K", "000").strip())
-        forecast_val = float(str(forecast).replace("%", "").replace("K", "000").strip())
+        actual_val = float(str(actual).replace("%", "").replace("K", "000").replace("M", "000000").strip())
+        forecast_val = float(str(forecast).replace("%", "").replace("K", "000").replace("M", "000000").strip())
         for key, analysis in EVENT_ANALYSIS.items():
             if key.lower() in title.lower():
                 is_unemployment = "unemployment" in key.lower()
                 is_better = actual_val < forecast_val if is_unemployment else actual_val > forecast_val
-                diff = abs(actual_val - forecast_val)
-                if diff == 0:
+                if abs(actual_val - forecast_val) == 0:
                     return "📊 ตรงตามคาด ไม่มีผลกระทบมากนักค่ะ"
                 result = "🟢 ดีกว่าคาด" if is_better else "🔴 แย่กว่าคาด"
                 detail = analysis["better"] if is_better else analysis["worse"]
@@ -81,7 +80,6 @@ def send_telegram(message, chat_id):
             "text": message,
             "parse_mode": "HTML"
         }, timeout=10)
-        print(f"Sent to {chat_id}: {r.status_code}")
         data = r.json()
         if data.get("ok"):
             msg_id = data["result"]["message_id"]
@@ -89,6 +87,7 @@ def send_telegram(message, chat_id):
             if key not in sent_messages:
                 sent_messages[key] = []
             sent_messages[key].append(msg_id)
+        print(f"Sent to {chat_id}: {r.status_code}")
     except Exception as e:
         print(f"Telegram error: {e}")
 
@@ -111,38 +110,65 @@ def send_all(message):
 
 def get_events():
     try:
-        url = f"https://www.alphavantage.co/query?function=ECONOMIC_CALENDAR&horizon=3month&apikey={ALPHA_KEY}"
-        r = requests.get(url, timeout=15)
-        data = r.json()
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        r = requests.get("https://www.forexfactory.com/ff_calendar_thisweek.xml", headers=headers, timeout=15)
+        print(f"FF XML status: {r.status_code}")
+
+        root = ET.fromstring(r.content)
         now = datetime.now(TZ)
         today = now.date()
         events = []
-        for item in data.get("data", []):
-            impact = item.get("impact", "")
+
+        current_date = None
+        for item in root.findall("event"):
+            # อัปเดตวันที่ถ้ามีค่ะ
+            date_el = item.find("date")
+            if date_el is not None and date_el.text:
+                try:
+                    current_date = datetime.strptime(date_el.text.strip(), "%m-%d-%Y").date()
+                except:
+                    pass
+
+            if current_date != today:
+                continue
+
+            impact = item.findtext("impact", "").strip()
             if impact not in ["High", "Medium", "Low"]:
                 continue
+
+            title = item.findtext("title", "").strip()
+            country = item.findtext("country", "").strip()
+            time_str = item.findtext("time", "").strip()
+            forecast = item.findtext("forecast", "").strip()
+            previous = item.findtext("previous", "").strip()
+            actual = item.findtext("actual", "").strip()
+
+            # แปลงเวลาจาก ET เป็น Bangkok ค่ะ
             try:
-                dt_str = item.get("date", "")
-                if "T" in dt_str:
-                    dt = datetime.fromisoformat(dt_str).astimezone(TZ)
+                if time_str and time_str.lower() != "all day" and time_str != "":
+                    et = pytz.timezone("America/New_York")
+                    dt_naive = datetime.strptime(f"{current_date} {time_str}", "%Y-%m-%d %I:%M%p")
+                    dt = et.localize(dt_naive).astimezone(TZ)
                 else:
-                    dt = TZ.localize(datetime.strptime(dt_str, "%Y-%m-%d"))
-                if dt.date() == today:
-                    events.append({
-                        "title": item.get("event", ""),
-                        "country": item.get("country", ""),
-                        "impact": impact,
-                        "time": dt,
-                        "forecast": item.get("forecast", "-"),
-                        "previous": item.get("previous", "-"),
-                        "actual": item.get("actual", "-"),
-                    })
+                    dt = TZ.localize(datetime.combine(current_date, datetime.min.time()))
             except:
-                continue
+                dt = TZ.localize(datetime.combine(current_date, datetime.min.time()))
+
+            events.append({
+                "title": title,
+                "country": country,
+                "impact": impact,
+                "time": dt,
+                "forecast": forecast if forecast else "-",
+                "previous": previous if previous else "-",
+                "actual": actual if actual else "-",
+            })
+
         events.sort(key=lambda x: x["time"])
+        print(f"Found {len(events)} events today")
         return events
     except Exception as e:
-        print(f"API error: {e}")
+        print(f"FF XML error: {e}")
         return []
 
 def build_daily_message():
@@ -159,8 +185,7 @@ def build_daily_message():
         msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}\n\n"
     return msg
 
-# ===== Webhook รับคำสั่งจาก Telegram =====
-@app.route(f"/webhook", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
     try:
@@ -168,18 +193,32 @@ def webhook():
         chat_id = str(message.get("chat", {}).get("id", ""))
         text = message.get("text", "").strip().lower()
 
-        if text == "/today" or text == "/today@" + TELEGRAM_TOKEN.split(":")[0]:
+        if text.startswith("/today"):
             msg = build_daily_message()
             send_telegram(msg, chat_id)
 
-        elif text == "/clear":
+        elif text.startswith("/customers"):
+            admin_id = CHAT_IDS[0].strip() if CHAT_IDS else ""
+            if chat_id == admin_id:
+                msg = "👥 <b>รายชื่อลูกค้าทั้งหมดค่ะ</b>\n\n"
+                for i, cid in enumerate(CHAT_IDS, 1):
+                    cid = cid.strip()
+                    if cid:
+                        msg += f"{i}. <code>{cid}</code>\n"
+                msg += f"\nทั้งหมด {len([c for c in CHAT_IDS if c.strip()])} คนค่ะ"
+                send_telegram(msg, chat_id)
+            else:
+                send_telegram("❌ ไม่มีสิทธิ์ใช้คำสั่งนี้ค่ะ", chat_id)
+
+        elif text.startswith("/clear"):
             delete_messages(chat_id)
             send_telegram("🧹 ลบข้อความของ Bot ทั้งหมดแล้วค่ะ!", chat_id)
 
-        elif text == "/help":
+        elif text.startswith("/help"):
             msg = "🤖 <b>คำสั่งที่ใช้ได้ค่ะ</b>\n\n"
             msg += "/today - ดูข่าวเศรษฐกิจวันนี้ค่ะ\n"
             msg += "/clear - ลบข้อความของ Bot ทั้งหมดค่ะ\n"
+            msg += "/customers - ดูรายชื่อลูกค้า (Admin เท่านั้น) ค่ะ\n"
             msg += "/help - ดูคำสั่งทั้งหมดค่ะ"
             send_telegram(msg, chat_id)
 
