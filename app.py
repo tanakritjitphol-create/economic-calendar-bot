@@ -110,7 +110,7 @@ def get_events():
     try:
         now = datetime.now(TZ)
         today = now.strftime("%Y-%m-%d")
-        url = f"https://financialmodelingprep.com/api/v3/economic_calendar?from={today}&to={today}&apikey={FMP_KEY}"
+        url = f"https://financialmodelingprep.com/stable/economic-calendar?from={today}&to={today}&apikey={FMP_KEY}"
         r = requests.get(url, timeout=15)
         print(f"FMP status: {r.status_code}")
         data = r.json()
