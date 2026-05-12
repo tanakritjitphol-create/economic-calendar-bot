@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 import requests
-import xml.etree.ElementTree as ET
 import os
 from datetime import datetime, timedelta
 import pytz
@@ -10,16 +9,15 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")
 BASE_URL = os.environ.get("BASE_URL", "")
+FMP_KEY = os.environ.get("FMP_KEY", "")
 
 TZ = pytz.timezone("Asia/Bangkok")
-
 sent_messages = {}
 
 IMPACT_EMOJI = {
     "High": "🔴",
     "Medium": "🟠",
-    "Low": "🟡",
-    "Non-Economic": None
+    "Low": "🟡"
 }
 
 EVENT_ANALYSIS = {
@@ -55,10 +53,10 @@ EVENT_ANALYSIS = {
 
 def get_analysis(title, actual, forecast):
     try:
-        if not actual or not forecast or actual == "" or forecast == "":
+        if not actual or not forecast:
             return None
-        actual_val = float(str(actual).replace("%", "").replace("K", "000").replace("M", "000000").strip())
-        forecast_val = float(str(forecast).replace("%", "").replace("K", "000").replace("M", "000000").strip())
+        actual_val = float(str(actual).replace("%", "").replace("K", "000").strip())
+        forecast_val = float(str(forecast).replace("%", "").replace("K", "000").strip())
         for key, analysis in EVENT_ANALYSIS.items():
             if key.lower() in title.lower():
                 is_unemployment = "unemployment" in key.lower()
@@ -110,65 +108,40 @@ def send_all(message):
 
 def get_events():
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        r = requests.get("https://www.forexfactory.com/ff_calendar_thisweek.xml", headers=headers, timeout=15)
-        print(f"FF XML status: {r.status_code}")
-
-        root = ET.fromstring(r.content)
         now = datetime.now(TZ)
-        today = now.date()
+        today = now.strftime("%Y-%m-%d")
+        url = f"https://financialmodelingprep.com/api/v3/economic_calendar?from={today}&to={today}&apikey={FMP_KEY}"
+        r = requests.get(url, timeout=15)
+        print(f"FMP status: {r.status_code}")
+        data = r.json()
+        print(f"FMP events: {len(data)}")
+
         events = []
-
-        current_date = None
-        for item in root.findall("event"):
-            # อัปเดตวันที่ถ้ามีค่ะ
-            date_el = item.find("date")
-            if date_el is not None and date_el.text:
-                try:
-                    current_date = datetime.strptime(date_el.text.strip(), "%m-%d-%Y").date()
-                except:
-                    pass
-
-            if current_date != today:
-                continue
-
-            impact = item.findtext("impact", "").strip()
+        for item in data:
+            impact = item.get("impact", "")
             if impact not in ["High", "Medium", "Low"]:
                 continue
 
-            title = item.findtext("title", "").strip()
-            country = item.findtext("country", "").strip()
-            time_str = item.findtext("time", "").strip()
-            forecast = item.findtext("forecast", "").strip()
-            previous = item.findtext("previous", "").strip()
-            actual = item.findtext("actual", "").strip()
-
-            # แปลงเวลาจาก ET เป็น Bangkok ค่ะ
             try:
-                if time_str and time_str.lower() != "all day" and time_str != "":
-                    et = pytz.timezone("America/New_York")
-                    dt_naive = datetime.strptime(f"{current_date} {time_str}", "%Y-%m-%d %I:%M%p")
-                    dt = et.localize(dt_naive).astimezone(TZ)
-                else:
-                    dt = TZ.localize(datetime.combine(current_date, datetime.min.time()))
+                dt_str = item.get("date", "")
+                dt = datetime.fromisoformat(dt_str).astimezone(TZ)
             except:
-                dt = TZ.localize(datetime.combine(current_date, datetime.min.time()))
+                continue
 
             events.append({
-                "title": title,
-                "country": country,
+                "title": item.get("event", ""),
+                "country": item.get("country", ""),
                 "impact": impact,
                 "time": dt,
-                "forecast": forecast if forecast else "-",
-                "previous": previous if previous else "-",
-                "actual": actual if actual else "-",
+                "forecast": item.get("estimate", "-") or "-",
+                "previous": item.get("previous", "-") or "-",
+                "actual": item.get("actual", "-") or "-",
             })
 
         events.sort(key=lambda x: x["time"])
-        print(f"Found {len(events)} events today")
         return events
     except Exception as e:
-        print(f"FF XML error: {e}")
+        print(f"FMP error: {e}")
         return []
 
 def build_daily_message():
