@@ -1,7 +1,9 @@
 from flask import Flask, request, jsonify
 import requests
+import csv
+import io
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 app = Flask(__name__)
@@ -9,7 +11,7 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")
 BASE_URL = os.environ.get("BASE_URL", "")
-FMP_KEY = os.environ.get("FMP_KEY", "")
+SHEET_ID = os.environ.get("SHEET_ID", "")
 
 TZ = pytz.timezone("Asia/Bangkok")
 sent_messages = {}
@@ -53,7 +55,7 @@ EVENT_ANALYSIS = {
 
 def get_analysis(title, actual, forecast):
     try:
-        if not actual or not forecast:
+        if not actual or not forecast or actual == "-" or forecast == "-":
             return None
         actual_val = float(str(actual).replace("%", "").replace("K", "000").strip())
         forecast_val = float(str(forecast).replace("%", "").replace("K", "000").strip())
@@ -108,40 +110,53 @@ def send_all(message):
 
 def get_events():
     try:
-        now = datetime.now(TZ)
-        today = now.strftime("%Y-%m-%d")
-        url = f"https://financialmodelingprep.com/stable/economic-calendar?from={today}&to={today}&apikey={FMP_KEY}"
+        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
         r = requests.get(url, timeout=15)
-        print(f"FMP status: {r.status_code}")
-        data = r.json()
-        print(f"FMP events: {len(data)}")
+        print(f"Sheet status: {r.status_code}")
 
+        now = datetime.now(TZ)
+        today = now.date()
         events = []
-        for item in data:
-            impact = item.get("impact", "")
-            if impact not in ["High", "Medium", "Low"]:
-                continue
 
+        reader = csv.DictReader(io.StringIO(r.text))
+        for row in reader:
             try:
-                dt_str = item.get("date", "")
-                dt = datetime.fromisoformat(dt_str).astimezone(TZ)
-            except:
-                continue
+                date_str = row.get("date", "").strip()
+                time_str = row.get("time", "").strip()
+                impact = row.get("impact", "").strip()
 
-            events.append({
-                "title": item.get("event", ""),
-                "country": item.get("country", ""),
-                "impact": impact,
-                "time": dt,
-                "forecast": item.get("estimate", "-") or "-",
-                "previous": item.get("previous", "-") or "-",
-                "actual": item.get("actual", "-") or "-",
-            })
+                if impact not in ["High", "Medium", "Low"]:
+                    continue
+
+                event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                if event_date != today:
+                    continue
+
+                # แปลงเวลาค่ะ
+                try:
+                    dt_naive = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                    dt = TZ.localize(dt_naive)
+                except:
+                    dt = TZ.localize(datetime.combine(event_date, datetime.min.time()))
+
+                events.append({
+                    "title": row.get("event", "").strip(),
+                    "country": row.get("country", "").strip(),
+                    "impact": impact,
+                    "time": dt,
+                    "forecast": row.get("forecast", "-").strip() or "-",
+                    "previous": row.get("previous", "-").strip() or "-",
+                    "actual": row.get("actual", "-").strip() or "-",
+                })
+            except Exception as e:
+                print(f"Row error: {e}")
+                continue
 
         events.sort(key=lambda x: x["time"])
+        print(f"Found {len(events)} events today")
         return events
     except Exception as e:
-        print(f"FMP error: {e}")
+        print(f"Sheet error: {e}")
         return []
 
 def build_daily_message():
