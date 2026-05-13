@@ -15,42 +15,18 @@ SHEET_ID = os.environ.get("SHEET_ID", "")
 
 TZ = pytz.timezone("Asia/Bangkok")
 sent_messages = {}
+sent_actual_alerts = set()
 
-IMPACT_EMOJI = {
-    "High": "🔴",
-    "Medium": "🟠",
-    "Low": "🟡"
-}
+IMPACT_EMOJI = {"High": "🔴", "Medium": "🟠", "Low": "🟡"}
 
 EVENT_ANALYSIS = {
-    "CPI": {
-        "better": "เงินเฟ้อต่ำกว่าคาด 📉 Fed อาจลดดอกเบี้ย → USD อ่อน, ทองอาจขึ้น",
-        "worse": "เงินเฟ้อสูงกว่าคาด 📈 Fed อาจขึ้นดอกเบี้ย → USD แข็ง, ทองอาจลง"
-    },
-    "GDP": {
-        "better": "เศรษฐกิจดีกว่าคาด 💪 → USD แข็ง, หุ้นอาจขึ้น",
-        "worse": "เศรษฐกิจแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
-    },
-    "Non-Farm": {
-        "better": "การจ้างงานดีกว่าคาด 💼 → USD แข็ง, ทองอาจลง",
-        "worse": "การจ้างงานแย่กว่าคาด 😟 → USD อ่อน, ทองอาจขึ้น"
-    },
-    "Interest Rate": {
-        "better": "ขึ้นดอกเบี้ย 📈 → USD แข็ง, ทองอาจลง",
-        "worse": "ลดดอกเบี้ย 📉 → USD อ่อน, ทองอาจขึ้น"
-    },
-    "Unemployment": {
-        "better": "ว่างงานต่ำกว่าคาด ✅ → USD แข็ง, หุ้นอาจขึ้น",
-        "worse": "ว่างงานสูงกว่าคาด ❌ → USD อ่อน, หุ้นอาจลง"
-    },
-    "PMI": {
-        "better": "กิจกรรมเศรษฐกิจดีกว่าคาด 💪 → USD แข็ง, หุ้นอาจขึ้น",
-        "worse": "กิจกรรมเศรษฐกิจแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
-    },
-    "Retail Sales": {
-        "better": "การใช้จ่ายดีกว่าคาด 🛍 → USD แข็ง, หุ้นอาจขึ้น",
-        "worse": "การใช้จ่ายแย่กว่าคาด 😟 → USD อ่อน, หุ้นอาจลง"
-    },
+    "CPI": {"better": "เงินเฟ้อต่ำกว่าคาด -> USD อ่อน, ทองอาจขึ้น", "worse": "เงินเฟ้อสูงกว่าคาด -> USD แข็ง, ทองอาจลง"},
+    "GDP": {"better": "เศรษฐกิจดีกว่าคาด -> USD แข็ง, หุ้นอาจขึ้น", "worse": "เศรษฐกิจแย่กว่าคาด -> USD อ่อน, หุ้นอาจลง"},
+    "Non-Farm": {"better": "การจ้างงานดีกว่าคาด -> USD แข็ง, ทองอาจลง", "worse": "การจ้างงานแย่กว่าคาด -> USD อ่อน, ทองอาจขึ้น"},
+    "Interest Rate": {"better": "ขึ้นดอกเบี้ย -> USD แข็ง, ทองอาจลง", "worse": "ลดดอกเบี้ย -> USD อ่อน, ทองอาจขึ้น"},
+    "Unemployment": {"better": "ว่างงานต่ำกว่าคาด -> USD แข็ง, หุ้นอาจขึ้น", "worse": "ว่างงานสูงกว่าคาด -> USD อ่อน, หุ้นอาจลง"},
+    "PMI": {"better": "ดีกว่าคาด -> USD แข็ง, หุ้นอาจขึ้น", "worse": "แย่กว่าคาด -> USD อ่อน, หุ้นอาจลง"},
+    "Retail Sales": {"better": "การใช้จ่ายดีกว่าคาด -> USD แข็ง, หุ้นอาจขึ้น", "worse": "การใช้จ่ายแย่กว่าคาด -> USD อ่อน, หุ้นอาจลง"},
 }
 
 def get_analysis(title, actual, forecast):
@@ -64,10 +40,10 @@ def get_analysis(title, actual, forecast):
                 is_unemployment = "unemployment" in key.lower()
                 is_better = actual_val < forecast_val if is_unemployment else actual_val > forecast_val
                 if abs(actual_val - forecast_val) == 0:
-                    return "📊 ตรงตามคาด ไม่มีผลกระทบมากนักค่ะ"
-                result = "🟢 ดีกว่าคาด" if is_better else "🔴 แย่กว่าคาด"
+                    return "ตรงตามคาด ไม่มีผลกระทบมากนักค่ะ"
+                result = "ดีกว่าคาด" if is_better else "แย่กว่าคาด"
                 detail = analysis["better"] if is_better else analysis["worse"]
-                return f"{result}\n💡 {detail}"
+                return f"{result}\n{detail}"
         return None
     except:
         return None
@@ -75,11 +51,7 @@ def get_analysis(title, actual, forecast):
 def send_telegram(message, chat_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        r = requests.post(url, json={
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML"
-        }, timeout=10)
+        r = requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=10)
         data = r.json()
         if data.get("ok"):
             msg_id = data["result"]["message_id"]
@@ -113,32 +85,24 @@ def get_events():
         url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
         r = requests.get(url, timeout=15)
         print(f"Sheet status: {r.status_code}")
-
         now = datetime.now(TZ)
         today = now.date()
         events = []
-
         reader = csv.DictReader(io.StringIO(r.text))
         for row in reader:
             try:
                 date_str = row.get("date", "").strip()
                 time_str = row.get("time", "").strip()
                 impact = row.get("impact", "").strip()
-
                 if impact not in ["High", "Medium", "Low"]:
                     continue
-
                 event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
                 if event_date != today:
                     continue
-
-                # แปลงเวลาค่ะ
                 try:
-                    dt_naive = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-                    dt = TZ.localize(dt_naive)
+                    dt = TZ.localize(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
                 except:
                     dt = TZ.localize(datetime.combine(event_date, datetime.min.time()))
-
                 events.append({
                     "title": row.get("event", "").strip(),
                     "country": row.get("country", "").strip(),
@@ -150,8 +114,6 @@ def get_events():
                 })
             except Exception as e:
                 print(f"Row error: {e}")
-                continue
-
         events.sort(key=lambda x: x["time"])
         print(f"Found {len(events)} events today")
         return events
@@ -162,11 +124,10 @@ def get_events():
 def build_daily_message():
     events = get_events()
     if not events:
-        return "📅 <b>สรุปเหตุการณ์วันนี้</b>\n\nไม่มีข่าวสำคัญวันนี้ค่ะ ✅"
-    msg = f"📅 <b>เหตุการณ์เศรษฐกิจวันนี้</b>\n"
-    msg += f"🗓 {datetime.now(TZ).strftime('%d/%m/%Y')}\n\n"
+        return "📅 <b>สรุปเหตุการณ์วันนี้</b>\n\nไม่มีข่าวสำคัญวันนี้ค่ะ"
+    msg = f"📅 <b>เหตุการณ์เศรษฐกิจวันนี้</b>\n🗓 {datetime.now(TZ).strftime('%d/%m/%Y')}\n\n"
     for e in events:
-        emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
+        emoji = IMPACT_EMOJI.get(e["impact"], "")
         time_str = e["time"].strftime("%H:%M") if e["time"].hour != 0 else "ทั้งวัน"
         msg += f"{emoji} <b>{e['title']}</b>\n"
         msg += f"🌍 {e['country']} | ⏰ {time_str} น.\n"
@@ -179,14 +140,24 @@ def webhook():
     try:
         message = data.get("message", {})
         chat_id = str(message.get("chat", {}).get("id", ""))
-        text = message.get("text", "").strip().lower()
+        text = message.get("text", "").strip()
+        admin_id = CHAT_IDS[0].strip() if CHAT_IDS else ""
 
-        if text.startswith("/today"):
-            msg = build_daily_message()
-            send_telegram(msg, chat_id)
+        if text.lower().startswith("/today"):
+            send_telegram(build_daily_message(), chat_id)
 
-        elif text.startswith("/customers"):
-            admin_id = CHAT_IDS[0].strip() if CHAT_IDS else ""
+        elif text.lower().startswith("/broadcast"):
+            if chat_id == admin_id:
+                broadcast_msg = text[len("/broadcast"):].strip()
+                if broadcast_msg:
+                    send_all(f"📣 <b>ประกาศจากแอดมิน</b>\n\n{broadcast_msg}")
+                    send_telegram("✅ ส่งข้อความให้ลูกค้าทุกคนแล้วค่ะ!", chat_id)
+                else:
+                    send_telegram("❌ พิมพ์ข้อความหลัง /broadcast ด้วยนะคะ\nเช่น /broadcast ระวัง CPI คืนนี้นะคะ", chat_id)
+            else:
+                send_telegram("❌ ไม่มีสิทธิ์ใช้คำสั่งนี้ค่ะ", chat_id)
+
+        elif text.lower().startswith("/customers"):
             if chat_id == admin_id:
                 msg = "👥 <b>รายชื่อลูกค้าทั้งหมดค่ะ</b>\n\n"
                 for i, cid in enumerate(CHAT_IDS, 1):
@@ -198,16 +169,18 @@ def webhook():
             else:
                 send_telegram("❌ ไม่มีสิทธิ์ใช้คำสั่งนี้ค่ะ", chat_id)
 
-        elif text.startswith("/clear"):
+        elif text.lower().startswith("/clear"):
             delete_messages(chat_id)
             send_telegram("🧹 ลบข้อความของ Bot ทั้งหมดแล้วค่ะ!", chat_id)
 
-        elif text.startswith("/help"):
+        elif text.lower().startswith("/help"):
             msg = "🤖 <b>คำสั่งที่ใช้ได้ค่ะ</b>\n\n"
-            msg += "/today - ดูข่าวเศรษฐกิจวันนี้ค่ะ\n"
-            msg += "/clear - ลบข้อความของ Bot ทั้งหมดค่ะ\n"
-            msg += "/customers - ดูรายชื่อลูกค้า (Admin เท่านั้น) ค่ะ\n"
-            msg += "/help - ดูคำสั่งทั้งหมดค่ะ"
+            msg += "/today - ดูข่าววันนี้ค่ะ\n"
+            msg += "/clear - ลบข้อความ Bot ค่ะ\n"
+            msg += "/help - ดูคำสั่งทั้งหมดค่ะ\n\n"
+            msg += "<i>Admin เท่านั้นค่ะ</i>\n"
+            msg += "/broadcast [ข้อความ] - ส่งข้อความหาทุกคนค่ะ\n"
+            msg += "/customers - ดูรายชื่อลูกค้าค่ะ"
             send_telegram(msg, chat_id)
 
     except Exception as e:
@@ -227,8 +200,7 @@ def index():
 
 @app.route("/daily")
 def daily():
-    msg = build_daily_message()
-    send_all(msg)
+    send_all(build_daily_message())
     return "Daily summary sent!"
 
 @app.route("/alert")
@@ -242,17 +214,18 @@ def alert():
         diff = (e["time"] - now).total_seconds() / 60
         for mins in [60, 30, 5, 1]:
             if abs(diff - mins) <= 1:
-                emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
+                emoji = IMPACT_EMOJI.get(e["impact"], "")
                 msg = f"⏰ <b>แจ้งเตือนล่วงหน้า {mins} นาที</b>\n\n"
                 msg += f"{emoji} <b>{e['title']}</b>\n"
-                msg += f"🌍 {e['country']}\n"
-                msg += f"🕐 เวลา {e['time'].strftime('%H:%M')} น.\n"
+                msg += f"🌍 {e['country']} | 🕐 {e['time'].strftime('%H:%M')} น.\n"
                 msg += f"📊 คาด: {e['forecast']} | ก่อนหน้า: {e['previous']}"
                 send_all(msg)
                 sent += 1
-        if -3 <= diff <= -1:
-            emoji = IMPACT_EMOJI.get(e["impact"], "⚪")
-            actual = e.get("actual", "-")
+
+        actual = e.get("actual", "-")
+        event_key = f"{e['title']}_{e['time'].strftime('%Y%m%d%H%M')}"
+        if actual != "-" and event_key not in sent_actual_alerts and diff < 0:
+            emoji = IMPACT_EMOJI.get(e["impact"], "")
             analysis = get_analysis(e["title"], actual, e["forecast"])
             msg = f"📢 <b>สรุปผลข่าว</b>\n\n"
             msg += f"{emoji} <b>{e['title']}</b>\n"
@@ -262,12 +235,14 @@ def alert():
             if analysis:
                 msg += f"\n{analysis}"
             send_all(msg)
+            sent_actual_alerts.add(event_key)
             sent += 1
-    return f"Checked alerts, sent {sent} messages"
+
+    return f"Checked {len(events)} events, sent {sent} messages"
 
 @app.route("/test")
 def test():
-    send_all("🤖 <b>Economic Calendar Bot ทดสอบระบบค่ะ!</b>\n\nBot พร้อมทำงานแล้วค่ะ ✅\n\nพิมพ์ /today เพื่อดูข่าววันนี้ได้เลยค่ะ")
+    send_all("🤖 <b>Economic Calendar Bot พร้อมแล้วค่ะ!</b>\n\nพิมพ์ /help เพื่อดูคำสั่งทั้งหมดค่ะ")
     return "Test sent!"
 
 if __name__ == "__main__":
