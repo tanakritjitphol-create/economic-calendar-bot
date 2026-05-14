@@ -224,7 +224,7 @@ def alert():
 
         actual = e.get("actual", "-")
         event_key = f"{e['title']}_{e['time'].strftime('%Y%m%d%H%M')}"
-        if actual != "-" and event_key not in sent_actual_alerts and diff < 0:
+        if actual != "-" and event_key not in sent_actual_alerts and -30 < diff < 0:
             emoji = IMPACT_EMOJI.get(e["impact"], "")
             analysis = get_analysis(e["title"], actual, e["forecast"])
             msg = f"📢 <b>สรุปผลข่าว</b>\n\n"
